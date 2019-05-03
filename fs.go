@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +54,14 @@ func (root *Root) mount(mtpt string, isDbg bool) error {
 	return nil
 }
 
+func lookup(n nodefs.Node, name string) (*nodefs.Inode, fuse.Status) {
+	c := n.Inode().GetChild(name)
+	if c == nil {
+		return nil, fuse.ENOENT
+	}
+	return c, fuse.OK
+}
+
 /* Root */
 
 // GetAttr ...
@@ -80,18 +89,16 @@ func (root *Root) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 			db:   root.db,
 			tbl:  tbl,
 		}
-		root.Inode().NewChild(tbl, true, tblDir)
+		if root.Inode().GetChild(tbl) == nil {
+			root.Inode().NewChild(tbl, true, tblDir)
+		}
 	}
 	return dirs, fuse.OK
 }
 
 // Lookup ...
 func (root *Root) Lookup(out *fuse.Attr, name string, ctx *fuse.Context) (*nodefs.Inode, fuse.Status) {
-	c := root.Inode().GetChild(name)
-	if c == nil {
-		return nil, fuse.ENOENT
-	}
-	return c, fuse.OK
+	return lookup(root, name)
 }
 
 /* TblDir */
@@ -100,6 +107,11 @@ func (root *Root) Lookup(out *fuse.Attr, name string, ctx *fuse.Context) (*nodef
 func (dir *TblDir) GetAttr(out *fuse.Attr, file nodefs.File, ctx *fuse.Context) fuse.Status {
 	out.Mode = fuse.S_IFDIR | 0755
 	return fuse.OK
+}
+
+// Lookup ...
+func (dir *TblDir) Lookup(out *fuse.Attr, name string, ctx *fuse.Context) (*nodefs.Inode, fuse.Status) {
+	return lookup(dir, name)
 }
 
 // OpenDir ...
@@ -142,7 +154,9 @@ func (dir *TblDir) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 			id:   fileNm,
 			data: []byte(strings.Join(lines, "\n")),
 		}
-		dir.Inode().NewChild(fileNm, false, file)
+		if dir.Inode().GetChild(fileNm) == nil {
+			dir.Inode().NewChild(fileNm, false, file)
+		}
 		// Add DirEntry
 		dirs = append(dirs, fuse.DirEntry{
 			Mode: fuse.S_IFREG | 0755,
@@ -151,4 +165,30 @@ func (dir *TblDir) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 		rowIdx++
 	}
 	return dirs, fuse.OK
+}
+
+/* RowFile */
+
+// GetAttr ...
+func (f *RowFile) GetAttr(out *fuse.Attr, file nodefs.File, ctx *fuse.Context) fuse.Status {
+	out.Mode = fuse.S_IFREG | 0755
+	out.Size = uint64(int64(len(f.data)))
+	return fuse.OK
+}
+
+// Open ...
+func (f *RowFile) Open(flags uint32, ctx *fuse.Context) (nodefs.File, fuse.Status) {
+	return nodefs.NewDataFile(f.data), fuse.OK
+}
+
+// Write ...
+func (f *RowFile) Write(file nodefs.File, data []byte, off int64, context *fuse.Context) (written uint32, code fuse.Status) {
+	if !reflect.DeepEqual(f.data, data) {
+		f.update(data)
+	}
+	return uint32(int32(len(data))), fuse.OK
+}
+
+func (f *RowFile) update(data []byte) {
+	f.data = data
 }
