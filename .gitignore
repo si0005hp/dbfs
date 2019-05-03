@@ -1,4 +1,6 @@
 /vendor
 /dist
 /tmp
+/mnt
+/.vscode
 *.db
