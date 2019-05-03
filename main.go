@@ -21,4 +21,11 @@ func main() {
 		log.Fatalf("FATAL %s", err)
 	}
 	fmt.Println(tbls)
+
+	rows, err := Rows(db, "emp")
+	if err != nil {
+		log.Fatalf("FATAL %s", err)
+	}
+	fmt.Println(rows)
+	fmt.Println(rows.Columns())
 }
