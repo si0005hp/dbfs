@@ -16,35 +16,28 @@ import (
 // Root ...
 type Root struct {
 	nodefs.Node
-	db *sql.DB
+	con DBCon
 }
 
 // TblDir ...
 type TblDir struct {
 	nodefs.Node
-	db   *sql.DB
+	con  DBCon
 	meta *TblMeta
 }
 
 // RowFile ...
 type RowFile struct {
 	nodefs.Node
-	id   string // id represents the file name same time
-	data []byte
-	db   *sql.DB
-	meta *TblMeta
+	id     string // id represents the file name same time
+	data   []byte
+	parent *TblDir // parent TblDir
 }
 
-// TblMeta ...
-type TblMeta struct {
-	tblNm  string
-	pkCols []string
-}
-
-func newRoot(db *sql.DB) *Root {
+func newRoot(con DBCon) *Root {
 	return &Root{
 		Node: nodefs.NewDefaultNode(),
-		db:   db,
+		con:  con,
 	}
 }
 
@@ -88,8 +81,7 @@ func (root *Root) GetAttr(out *fuse.Attr, file nodefs.File, ctx *fuse.Context) f
 
 // OpenDir ...
 func (root *Root) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
-	// tbls, err := Tables(root.db)
-	ms, err := TblsMetadata(root.db)
+	ms, err := root.con.GetTblsMetadata()
 	if err != nil {
 		panic(err)
 	}
@@ -104,7 +96,7 @@ func (root *Root) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 		// Create TblDir
 		tblDir := &TblDir{
 			Node: nodefs.NewDefaultNode(),
-			db:   root.db,
+			con:  root.con,
 			meta: m,
 		}
 		if root.Inode().GetChild(tbl) == nil {
@@ -136,7 +128,7 @@ func (dir *TblDir) Lookup(out *fuse.Attr, name string, ctx *fuse.Context) (*node
 // OpenDir ...
 func (dir *TblDir) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 	// Fetch tables rows
-	rows, err := Rows(dir.db, dir.meta.tblNm)
+	rows, err := dir.con.FetchRows(dir.meta.tblNm)
 	if err != nil {
 		panic(err)
 	}
@@ -169,11 +161,10 @@ func (dir *TblDir) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 		// Add child
 		fileNm := strconv.Itoa(rowIdx)
 		file := &RowFile{
-			Node: nodefs.NewDefaultNode(),
-			id:   fileNm,
-			data: []byte(strings.Join(lines, "\n")),
-			db:   dir.db,
-			meta: dir.meta,
+			Node:   nodefs.NewDefaultNode(),
+			id:     fileNm,
+			data:   []byte(strings.Join(lines, "\n")),
+			parent: dir,
 		}
 		if dir.Inode().GetChild(fileNm) == nil {
 			dir.Inode().NewChild(fileNm, false, file)
@@ -228,13 +219,13 @@ func (f *RowFile) update(data []byte) (sql.Result, error) {
 	}
 
 	pkCols := make(map[string]string)
-	for _, pk := range f.meta.pkCols {
+	for _, pk := range f.parent.meta.pkCols {
 		pkV, ok := oldP.Get(pk)
 		if !ok {
-			return nil, fmt.Errorf("%s: pk %s is not found", f.meta.tblNm, pk)
+			return nil, fmt.Errorf("%s: pk %s is not found", f.parent.meta.tblNm, pk)
 		}
 		pkCols[pk] = pkV
 	}
 
-	return Update(f.db, f.meta.tblNm, updCols, pkCols)
+	return f.parent.con.UpdateRow(f.parent.meta.tblNm, updCols, pkCols)
 }

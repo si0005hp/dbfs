@@ -9,8 +9,27 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// OpenDB ...
-func OpenDB(dsn string) (*sql.DB, error) {
+// DBCon ...
+type DBCon interface {
+	GetTblsMetadata() (map[string]*TblMeta, error)
+	FetchRows(tbl string) (*sql.Rows, error)
+	UpdateRow(tbl string, updCols map[string]string, pkCols map[string]string) (sql.Result, error)
+	Close() error
+}
+
+// TblMeta ...
+type TblMeta struct {
+	tblNm  string
+	pkCols []string
+}
+
+// SQLiteCon ...
+type SQLiteCon struct {
+	db *sql.DB
+}
+
+// OpenSQLiteCon ...
+func OpenSQLiteCon(dsn string) (*SQLiteCon, error) {
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return nil, err
@@ -24,13 +43,13 @@ func OpenDB(dsn string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return db, nil
+	return &SQLiteCon{db: db}, nil
 }
 
-// TblsMetadata ...
-func TblsMetadata(db *sql.DB) (map[string]*TblMeta, error) {
-	q := `SELECT name FROM sqlite_master WHERE type='table'`
-	rows, err := db.Query(q)
+// GetTblsMetadata ...
+func (con *SQLiteCon) GetTblsMetadata() (map[string]*TblMeta, error) {
+	q := "SELECT name FROM sqlite_master WHERE type='table'"
+	rows, err := con.db.Query(q)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +63,7 @@ func TblsMetadata(db *sql.DB) (map[string]*TblMeta, error) {
 			return nil, err
 		}
 
-		m, err := createTblMeta(db, tblNm)
+		m, err := con.createTblMeta(con.db, tblNm)
 		if err != nil {
 			return nil, err
 		}
@@ -53,7 +72,37 @@ func TblsMetadata(db *sql.DB) (map[string]*TblMeta, error) {
 	return ms, nil
 }
 
-func createTblMeta(db *sql.DB, tbl string) (*TblMeta, error) {
+// FetchRows ...
+func (con *SQLiteCon) FetchRows(tbl string) (*sql.Rows, error) {
+	q := fmt.Sprintf("SELECT * FROM %s", tbl)
+	rows, err := con.db.Query(q)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// UpdateRow ...
+func (con *SQLiteCon) UpdateRow(tbl string, updCols map[string]string, pkCols map[string]string) (sql.Result, error) {
+	updClause, updParams := con.clauseAndParams(updCols, " , ")
+	whereClause, whereParams := con.clauseAndParams(pkCols, " AND ")
+
+	q := fmt.Sprintf("UPDATE %s SET %s WHERE %s", tbl, updClause, whereClause)
+	stmt, err := con.db.Prepare(q)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	return stmt.Exec(append(updParams, whereParams...)...)
+}
+
+// Close ...
+func (con *SQLiteCon) Close() error {
+	return con.db.Close()
+}
+
+func (con *SQLiteCon) createTblMeta(db *sql.DB, tbl string) (*TblMeta, error) {
 	q := fmt.Sprintf("SELECT name, pk FROM pragma_table_info('%s')", tbl)
 	rows, err := db.Query(q)
 	if err != nil {
@@ -76,32 +125,7 @@ func createTblMeta(db *sql.DB, tbl string) (*TblMeta, error) {
 	return &TblMeta{tblNm: tbl, pkCols: pkCols}, nil
 }
 
-// Rows ...
-func Rows(db *sql.DB, tbl string) (*sql.Rows, error) {
-	q := fmt.Sprintf("SELECT * FROM %s", tbl)
-	rows, err := db.Query(q)
-	if err != nil {
-		return nil, err
-	}
-	return rows, nil
-}
-
-// Update ...
-func Update(db *sql.DB, tbl string, updCols map[string]string, pkCols map[string]string) (sql.Result, error) {
-	updClause, updParams := clauseAndParams(updCols, " , ")
-	whereClause, whereParams := clauseAndParams(pkCols, " AND ")
-
-	q := fmt.Sprintf("UPDATE %s SET %s WHERE %s", tbl, updClause, whereClause)
-	stmt, err := db.Prepare(q)
-	if err != nil {
-		return nil, err
-	}
-	defer stmt.Close()
-
-	return stmt.Exec(append(updParams, whereParams...)...)
-}
-
-func clauseAndParams(cols map[string]string, sep string) (string, []interface{}) {
+func (con *SQLiteCon) clauseAndParams(cols map[string]string, sep string) (string, []interface{}) {
 	i := 0
 	clauses := make([]string, len(cols))
 	params := make([]interface{}, len(cols))

@@ -11,13 +11,12 @@ func main() {
 	isDbg := flag.Bool("dbg", true, "enable fuse debug")
 	flag.Parse()
 
-	db, err := OpenDB(*dsn)
+	con, err := OpenSQLiteCon(*dsn)
 	if err != nil {
 		log.Fatalf("FATAL %s", err)
 	}
-	defer db.Close()
+	defer con.Close()
 
-	// mount
-	fs := newRoot(db)
+	fs := newRoot(con)
 	fs.mount(*mtpt, *isDbg)
 }
