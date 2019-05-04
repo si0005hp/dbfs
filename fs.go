@@ -124,18 +124,16 @@ func (root *Root) GetAttr(out *fuse.Attr, file nodefs.File, ctx *fuse.Context) f
 	return fuse.OK
 }
 
-// OpenDir ...
-func (root *Root) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
+func (root *Root) getChildren() ([]*TblDir, error) {
 	now := time.Now()
 	ms, err := root.con.GetTblsMetadata()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	i := 0
-	dirs := make([]fuse.DirEntry, len(ms))
+	dirs := make([]*TblDir, len(ms))
 	for tbl, m := range ms {
-		// Create TblDir
-		tblDir := &TblDir{
+		dirs[i] = &TblDir{
 			Node: nodefs.NewDefaultNode(),
 			FileInfo: FileInfo{
 				name:         tbl,
@@ -146,13 +144,23 @@ func (root *Root) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 			con:  root.con,
 			meta: m,
 		}
-		// Create DirEntry
-		tblDir.FileInfo.mapDirEntry(&dirs[i])
-
-		if root.Inode().GetChild(tbl) == nil {
-			root.Inode().NewChild(tbl, true, tblDir)
-		}
 		i++
+	}
+	return dirs, nil
+}
+
+// OpenDir ...
+func (root *Root) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
+	children, err := root.getChildren()
+	if err != nil {
+		panic(err)
+	}
+	dirs := make([]fuse.DirEntry, len(children))
+	for i, c := range children {
+		c.FileInfo.mapDirEntry(&dirs[i])
+		if root.Inode().GetChild(c.FileInfo.name) == nil {
+			root.Inode().NewChild(c.FileInfo.name, true, c)
+		}
 	}
 	return dirs, fuse.OK
 }
@@ -175,22 +183,19 @@ func (dir *TblDir) Lookup(out *fuse.Attr, name string, ctx *fuse.Context) (*node
 	return lookup(dir, out, name, ctx)
 }
 
-// OpenDir ...
-func (dir *TblDir) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
-	// Fetch tables rows
+func (dir *TblDir) getChildren() ([]*RowFile, error) {
 	rows, err := dir.con.FetchRows(dir.meta.tblNm)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	cols, err := rows.Columns()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	defer rows.Close()
 
-	// Create childs
 	rowIdx := 1
-	var dirs []fuse.DirEntry
+	files := make([]*RowFile, 0)
 	for rows.Next() {
 		// Scan row
 		vals := make([]interface{}, len(cols))
@@ -200,7 +205,7 @@ func (dir *TblDir) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 		}
 		err = rows.Scan(vals...)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		// Create file content
 		lines := make([]string, len(cols))
@@ -208,10 +213,10 @@ func (dir *TblDir) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 			v := *(p.(*string))
 			lines[i] = fmt.Sprintf("%s=%s", cols[i], v)
 		}
-		// Add child
+		// Create RowFile
 		fileNm := strconv.Itoa(rowIdx)
 		data := []byte(strings.Join(lines, "\n"))
-		file := &RowFile{
+		files = append(files, &RowFile{
 			Node: nodefs.NewDefaultNode(),
 			FileInfo: FileInfo{
 				name:         fileNm,
@@ -223,16 +228,24 @@ func (dir *TblDir) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 			id:     fileNm,
 			data:   data,
 			parent: dir,
-		}
-		if dir.Inode().GetChild(fileNm) == nil {
-			dir.Inode().NewChild(fileNm, false, file)
-		}
-		// Add DirEntry
-		var de fuse.DirEntry
-		file.FileInfo.mapDirEntry(&de)
-		dirs = append(dirs, de)
-
+		})
 		rowIdx++
+	}
+	return files, nil
+}
+
+// OpenDir ...
+func (dir *TblDir) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
+	children, err := dir.getChildren()
+	if err != nil {
+		panic(err)
+	}
+	dirs := make([]fuse.DirEntry, len(children))
+	for i, c := range children {
+		c.FileInfo.mapDirEntry(&dirs[i])
+		if dir.Inode().GetChild(c.FileInfo.name) == nil {
+			dir.Inode().NewChild(c.FileInfo.name, false, c)
+		}
 	}
 	return dirs, fuse.OK
 }
