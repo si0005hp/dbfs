@@ -23,7 +23,7 @@ type Root struct {
 type TblDir struct {
 	nodefs.Node
 	db   *sql.DB
-	meta TblMeta
+	meta *TblMeta
 }
 
 // RowFile ...
@@ -79,12 +79,14 @@ func (root *Root) GetAttr(out *fuse.Attr, file nodefs.File, ctx *fuse.Context) f
 
 // OpenDir ...
 func (root *Root) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
-	tbls, err := Tables(root.db)
+	// tbls, err := Tables(root.db)
+	ms, err := TblsMetadata(root.db)
 	if err != nil {
 		panic(err)
 	}
-	dirs := make([]fuse.DirEntry, len(tbls))
-	for i, tbl := range tbls {
+	i := 0
+	dirs := make([]fuse.DirEntry, len(ms))
+	for tbl, m := range ms {
 		// Create DirEntry
 		dirs[i] = fuse.DirEntry{
 			Mode: fuse.S_IFDIR | 0755,
@@ -94,11 +96,12 @@ func (root *Root) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 		tblDir := &TblDir{
 			Node: nodefs.NewDefaultNode(),
 			db:   root.db,
-			meta: TblMeta{tblNm: tbl},
+			meta: m,
 		}
 		if root.Inode().GetChild(tbl) == nil {
 			root.Inode().NewChild(tbl, true, tblDir)
 		}
+		i++
 	}
 	return dirs, fuse.OK
 }
@@ -160,7 +163,7 @@ func (dir *TblDir) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 			Node: nodefs.NewDefaultNode(),
 			id:   fileNm,
 			data: []byte(strings.Join(lines, "\n")),
-			meta: &dir.meta,
+			meta: dir.meta,
 		}
 		if dir.Inode().GetChild(fileNm) == nil {
 			dir.Inode().NewChild(fileNm, false, file)

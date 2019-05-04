@@ -26,8 +26,8 @@ func OpenDB(dsn string) (*sql.DB, error) {
 	return db, nil
 }
 
-// Tables ...
-func Tables(db *sql.DB) ([]string, error) {
+// TblsMetadata ...
+func TblsMetadata(db *sql.DB) (map[string]*TblMeta, error) {
 	q := `SELECT name FROM sqlite_master WHERE type='table'`
 	rows, err := db.Query(q)
 	if err != nil {
@@ -35,16 +35,44 @@ func Tables(db *sql.DB) ([]string, error) {
 	}
 	defer rows.Close()
 
-	var tbls []string
+	ms := make(map[string]*TblMeta)
 	for rows.Next() {
-		var name string
-		err = rows.Scan(&name)
+		var tblNm string
+		err = rows.Scan(&tblNm)
 		if err != nil {
 			return nil, err
 		}
-		tbls = append(tbls, name)
+
+		m, err := createTblMeta(db, tblNm)
+		if err != nil {
+			return nil, err
+		}
+		ms[tblNm] = m
 	}
-	return tbls, nil
+	return ms, nil
+}
+
+func createTblMeta(db *sql.DB, tbl string) (*TblMeta, error) {
+	q := fmt.Sprintf("SELECT name, pk FROM pragma_table_info('%s')", tbl)
+	rows, err := db.Query(q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var pkCols []string
+	for rows.Next() {
+		var name string
+		var pk int
+		err = rows.Scan(&name, &pk)
+		if err != nil {
+			return nil, err
+		}
+		if pk == 1 {
+			pkCols = append(pkCols, name)
+		}
+	}
+	return &TblMeta{tblNm: tbl, pkCols: pkCols}, nil
 }
 
 // Rows ...
