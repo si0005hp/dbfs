@@ -2,6 +2,26 @@
 
 
 [[projects]]
+  digest = "1:5f90bc125ec78cbf10b28e7d08b5fe2aecd04cd1ae93c74bb71c4c61151ad6ec"
+  name = "github.com/hanwen/go-fuse"
+  packages = [
+    "fuse",
+    "fuse/nodefs",
+    "splice",
+  ]
+  pruneopts = "UT"
+  revision = "5690be47d614355a22931c129e1075c25a62e9ac"
+  version = "v20170619"
+
+[[projects]]
+  digest = "1:c568d7727aa262c32bdf8a3f7db83614f7af0ed661474b24588de635c20024c7"
+  name = "github.com/magiconair/properties"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "c2353362d570a7bfa228149c62842019201cfb71"
+  version = "v1.8.0"
+
+[[projects]]
   digest = "1:4a49346ca45376a2bba679ca0e83bec949d780d4e927931317904bad482943ec"
   name = "github.com/mattn/go-sqlite3"
   packages = ["."]
@@ -12,6 +32,11 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  input-imports = ["github.com/mattn/go-sqlite3"]
+  input-imports = [
+    "github.com/hanwen/go-fuse/fuse",
+    "github.com/hanwen/go-fuse/fuse/nodefs",
+    "github.com/magiconair/properties",
+    "github.com/mattn/go-sqlite3",
+  ]
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -10,6 +10,7 @@ import (
 
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
+	"github.com/magiconair/properties"
 )
 
 // Root ...
@@ -21,9 +22,8 @@ type Root struct {
 // TblDir ...
 type TblDir struct {
 	nodefs.Node
-	db     *sql.DB
-	tbl    string
-	pkCols []string
+	db   *sql.DB
+	meta TblMeta
 }
 
 // RowFile ...
@@ -31,6 +31,13 @@ type RowFile struct {
 	nodefs.Node
 	id   string // id represents the file name same time
 	data []byte
+	meta *TblMeta
+}
+
+// TblMeta ...
+type TblMeta struct {
+	tblNm  string
+	pkCols []string
 }
 
 func newRoot(db *sql.DB) *Root {
@@ -87,7 +94,7 @@ func (root *Root) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 		tblDir := &TblDir{
 			Node: nodefs.NewDefaultNode(),
 			db:   root.db,
-			tbl:  tbl,
+			meta: TblMeta{tblNm: tbl},
 		}
 		if root.Inode().GetChild(tbl) == nil {
 			root.Inode().NewChild(tbl, true, tblDir)
@@ -117,7 +124,7 @@ func (dir *TblDir) Lookup(out *fuse.Attr, name string, ctx *fuse.Context) (*node
 // OpenDir ...
 func (dir *TblDir) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 	// Fetch tables rows
-	rows, err := Rows(dir.db, dir.tbl)
+	rows, err := Rows(dir.db, dir.meta.tblNm)
 	if err != nil {
 		panic(err)
 	}
@@ -153,6 +160,7 @@ func (dir *TblDir) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 			Node: nodefs.NewDefaultNode(),
 			id:   fileNm,
 			data: []byte(strings.Join(lines, "\n")),
+			meta: &dir.meta,
 		}
 		if dir.Inode().GetChild(fileNm) == nil {
 			dir.Inode().NewChild(fileNm, false, file)
@@ -190,5 +198,16 @@ func (f *RowFile) Write(file nodefs.File, data []byte, off int64, context *fuse.
 }
 
 func (f *RowFile) update(data []byte) {
+	newP := properties.MustLoadString(string(data))
+	oldP := properties.MustLoadString(string(f.data))
+
+	updCols := make(map[string]string)
+	for k, newV := range newP.Map() {
+		oldV, ok := oldP.Get(k)
+		if ok && oldV != newV {
+			updCols[k] = newV
+		}
+	}
+
 	f.data = data
 }
