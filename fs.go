@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -16,12 +17,14 @@ import (
 // Root ...
 type Root struct {
 	nodefs.Node
+	FileInfo
 	con DBCon
 }
 
 // TblDir ...
 type TblDir struct {
 	nodefs.Node
+	FileInfo
 	con  DBCon
 	meta *TblMeta
 }
@@ -29,15 +32,57 @@ type TblDir struct {
 // RowFile ...
 type RowFile struct {
 	nodefs.Node
+	FileInfo
 	id     string // id represents the file name same time
 	data   []byte
 	parent *TblDir // parent TblDir
 }
 
+// FileInfo ... refs os.FileInfo
+type FileInfo struct {
+	name         string
+	size         int64
+	mode         os.FileMode
+	modTime      time.Time
+	creationTime time.Time
+}
+
+// IsDir ... refs os.FileMode#IsDir
+func (i *FileInfo) isDir() bool {
+	return i.mode&os.ModeDir != 0
+}
+
+func (i *FileInfo) mapAttr(out *fuse.Attr) {
+	if i.isDir() {
+		out.Mode = fuse.S_IFDIR | uint32(i.mode)&07777
+	} else {
+		out.Mode = fuse.S_IFREG | uint32(i.mode)&07777
+	}
+	out.Mtime = uint64(i.modTime.Unix())
+	out.Atime = out.Mtime
+	out.Ctime = out.Mtime
+	out.Size = uint64(i.size)
+}
+
+func (i *FileInfo) mapDirEntry(out *fuse.DirEntry) {
+	if i.isDir() {
+		out.Mode = fuse.S_IFDIR | uint32(i.mode)&07777
+	} else {
+		out.Mode = fuse.S_IFREG | uint32(i.mode)&07777
+	}
+	out.Name = i.name
+}
+
 func newRoot(con DBCon) *Root {
+	now := time.Now()
 	return &Root{
 		Node: nodefs.NewDefaultNode(),
-		con:  con,
+		FileInfo: FileInfo{
+			mode:         os.ModeDir | 0755,
+			modTime:      now,
+			creationTime: now,
+		},
+		con: con,
 	}
 }
 
@@ -75,12 +120,13 @@ func lookup(n nodefs.Node, out *fuse.Attr, name string, ctx *fuse.Context) (*nod
 
 // GetAttr ...
 func (root *Root) GetAttr(out *fuse.Attr, file nodefs.File, ctx *fuse.Context) fuse.Status {
-	out.Mode = fuse.S_IFDIR | 0755
+	root.FileInfo.mapAttr(out)
 	return fuse.OK
 }
 
 // OpenDir ...
 func (root *Root) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
+	now := time.Now()
 	ms, err := root.con.GetTblsMetadata()
 	if err != nil {
 		panic(err)
@@ -88,17 +134,21 @@ func (root *Root) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 	i := 0
 	dirs := make([]fuse.DirEntry, len(ms))
 	for tbl, m := range ms {
-		// Create DirEntry
-		dirs[i] = fuse.DirEntry{
-			Mode: fuse.S_IFDIR | 0755,
-			Name: tbl,
-		}
 		// Create TblDir
 		tblDir := &TblDir{
 			Node: nodefs.NewDefaultNode(),
+			FileInfo: FileInfo{
+				name:         tbl,
+				mode:         os.ModeDir | 0755,
+				modTime:      now,
+				creationTime: now,
+			},
 			con:  root.con,
 			meta: m,
 		}
+		// Create DirEntry
+		tblDir.FileInfo.mapDirEntry(&dirs[i])
+
 		if root.Inode().GetChild(tbl) == nil {
 			root.Inode().NewChild(tbl, true, tblDir)
 		}
@@ -116,7 +166,7 @@ func (root *Root) Lookup(out *fuse.Attr, name string, ctx *fuse.Context) (*nodef
 
 // GetAttr ...
 func (dir *TblDir) GetAttr(out *fuse.Attr, file nodefs.File, ctx *fuse.Context) fuse.Status {
-	out.Mode = fuse.S_IFDIR | 0755
+	dir.FileInfo.mapAttr(out)
 	return fuse.OK
 }
 
@@ -160,20 +210,28 @@ func (dir *TblDir) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 		}
 		// Add child
 		fileNm := strconv.Itoa(rowIdx)
+		data := []byte(strings.Join(lines, "\n"))
 		file := &RowFile{
-			Node:   nodefs.NewDefaultNode(),
+			Node: nodefs.NewDefaultNode(),
+			FileInfo: FileInfo{
+				name:         fileNm,
+				size:         int64(len(data)),
+				mode:         0666,
+				modTime:      dir.FileInfo.modTime,
+				creationTime: dir.FileInfo.creationTime,
+			},
 			id:     fileNm,
-			data:   []byte(strings.Join(lines, "\n")),
+			data:   data,
 			parent: dir,
 		}
 		if dir.Inode().GetChild(fileNm) == nil {
 			dir.Inode().NewChild(fileNm, false, file)
 		}
 		// Add DirEntry
-		dirs = append(dirs, fuse.DirEntry{
-			Mode: fuse.S_IFREG | 0755,
-			Name: fileNm,
-		})
+		var de fuse.DirEntry
+		file.FileInfo.mapDirEntry(&de)
+		dirs = append(dirs, de)
+
 		rowIdx++
 	}
 	return dirs, fuse.OK
@@ -183,8 +241,7 @@ func (dir *TblDir) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 
 // GetAttr ...
 func (f *RowFile) GetAttr(out *fuse.Attr, file nodefs.File, ctx *fuse.Context) fuse.Status {
-	out.Mode = fuse.S_IFREG | 0755
-	out.Size = uint64(int64(len(f.data)))
+	f.FileInfo.mapAttr(out)
 	return fuse.OK
 }
 
