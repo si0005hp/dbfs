@@ -31,6 +31,7 @@ type RowFile struct {
 	nodefs.Node
 	id   string // id represents the file name same time
 	data []byte
+	db   *sql.DB
 	meta *TblMeta
 }
 
@@ -163,6 +164,7 @@ func (dir *TblDir) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 			Node: nodefs.NewDefaultNode(),
 			id:   fileNm,
 			data: []byte(strings.Join(lines, "\n")),
+			db:   dir.db,
 			meta: dir.meta,
 		}
 		if dir.Inode().GetChild(fileNm) == nil {
@@ -195,12 +197,17 @@ func (f *RowFile) Open(flags uint32, ctx *fuse.Context) (nodefs.File, fuse.Statu
 // Write ...
 func (f *RowFile) Write(file nodefs.File, data []byte, off int64, context *fuse.Context) (written uint32, code fuse.Status) {
 	if !reflect.DeepEqual(f.data, data) {
-		f.update(data)
+		_, err := f.update(data)
+		if err != nil {
+			panic(err)
+		} else {
+			f.data = data
+		}
 	}
 	return uint32(int32(len(data))), fuse.OK
 }
 
-func (f *RowFile) update(data []byte) {
+func (f *RowFile) update(data []byte) (sql.Result, error) {
 	newP := properties.MustLoadString(string(data))
 	oldP := properties.MustLoadString(string(f.data))
 
@@ -212,5 +219,14 @@ func (f *RowFile) update(data []byte) {
 		}
 	}
 
-	f.data = data
+	pkCols := make(map[string]string)
+	for _, pk := range f.meta.pkCols {
+		pkV, ok := oldP.Get(pk)
+		if !ok {
+			return nil, fmt.Errorf("%s: pk %s is not found", f.meta.tblNm, pk)
+		}
+		pkCols[pk] = pkV
+	}
+
+	return Update(f.db, f.meta.tblNm, updCols, pkCols)
 }

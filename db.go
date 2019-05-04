@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -83,4 +84,31 @@ func Rows(db *sql.DB, tbl string) (*sql.Rows, error) {
 		return nil, err
 	}
 	return rows, nil
+}
+
+// Update ...
+func Update(db *sql.DB, tbl string, updCols map[string]string, pkCols map[string]string) (sql.Result, error) {
+	updClause, updParams := clauseAndParams(updCols, " , ")
+	whereClause, whereParams := clauseAndParams(pkCols, " AND ")
+
+	q := fmt.Sprintf("UPDATE %s SET %s WHERE %s", tbl, updClause, whereClause)
+	stmt, err := db.Prepare(q)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	return stmt.Exec(append(updParams, whereParams...)...)
+}
+
+func clauseAndParams(cols map[string]string, sep string) (string, []interface{}) {
+	i := 0
+	clauses := make([]string, len(cols))
+	params := make([]interface{}, len(cols))
+	for k, v := range cols {
+		clauses[i] = fmt.Sprintf("%s = ?", k)
+		params[i] = v
+		i++
+	}
+	return strings.Join(clauses, sep), params
 }
