@@ -62,10 +62,18 @@ func (root *Root) mount(mtpt string, isDbg bool) error {
 	return nil
 }
 
-func lookup(n nodefs.Node, name string) (*nodefs.Inode, fuse.Status) {
+func lookup(n nodefs.Node, out *fuse.Attr, name string, ctx *fuse.Context) (*nodefs.Inode, fuse.Status) {
+	_, st := n.OpenDir(ctx)
+	if st != fuse.OK {
+		return nil, st
+	}
 	c := n.Inode().GetChild(name)
 	if c == nil {
 		return nil, fuse.ENOENT
+	}
+	st = c.Node().GetAttr(out, nil, ctx)
+	if st != fuse.OK {
+		return nil, st
 	}
 	return c, fuse.OK
 }
@@ -109,7 +117,7 @@ func (root *Root) OpenDir(ctx *fuse.Context) ([]fuse.DirEntry, fuse.Status) {
 
 // Lookup ...
 func (root *Root) Lookup(out *fuse.Attr, name string, ctx *fuse.Context) (*nodefs.Inode, fuse.Status) {
-	return lookup(root, name)
+	return lookup(root, out, name, ctx)
 }
 
 /* TblDir */
@@ -122,7 +130,7 @@ func (dir *TblDir) GetAttr(out *fuse.Attr, file nodefs.File, ctx *fuse.Context) 
 
 // Lookup ...
 func (dir *TblDir) Lookup(out *fuse.Attr, name string, ctx *fuse.Context) (*nodefs.Inode, fuse.Status) {
-	return lookup(dir, name)
+	return lookup(dir, out, name, ctx)
 }
 
 // OpenDir ...
