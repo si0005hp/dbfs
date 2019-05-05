@@ -7,7 +7,6 @@ import (
 	"os"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/hanwen/go-fuse/fuse"
@@ -53,6 +52,8 @@ type FileInfo struct {
 	modTime      time.Time
 	creationTime time.Time
 }
+
+var frm = NewPropertiesMapper() // TODO
 
 func (i *FileInfo) isDir() bool {
 	return i.mode&os.ModeDir != 0
@@ -211,47 +212,27 @@ func (dir *TblDir) GetChildren() ([]Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	cols, err := rows.Columns()
+	defer rows.Close()
+
+	bs, err := frm.MapToFile(rows)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	rowIdx := 1
-	files := make([]Node, 0)
-	for rows.Next() {
-		// Scan row
-		vals := make([]interface{}, len(cols))
-		for i := range vals {
-			var s string
-			vals[i] = &s
-		}
-		err = rows.Scan(vals...)
-		if err != nil {
-			return nil, err
-		}
-		// Create file content
-		lines := make([]string, len(cols))
-		for i, p := range vals {
-			v := *(p.(*string))
-			lines[i] = fmt.Sprintf("%s=%s", cols[i], v)
-		}
-		// Create RowFile
-		fileNm := strconv.Itoa(rowIdx)
-		data := []byte(strings.Join(lines, "\n"))
-		files = append(files, &RowFile{
+	files := make([]Node, len(bs))
+	for i, b := range bs {
+		files[i] = &RowFile{
 			Node: nodefs.NewDefaultNode(),
 			fileInfo: FileInfo{
-				name:         fileNm,
-				size:         int64(len(data)),
+				name:         strconv.Itoa(i + 1), // File name is sequential num
+				size:         int64(len(b)),
 				mode:         0666,
 				modTime:      dir.GetFileInfo().modTime,
 				creationTime: dir.GetFileInfo().creationTime,
 			},
-			data:   data,
+			data:   b,
 			parent: dir,
-		})
-		rowIdx++
+		}
 	}
 	return files, nil
 }
