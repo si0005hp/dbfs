@@ -1,9 +1,7 @@
 package main
 
 import (
-	"database/sql"
 	"errors"
-	"fmt"
 	"os"
 	"reflect"
 	"strconv"
@@ -11,7 +9,6 @@ import (
 
 	"github.com/hanwen/go-fuse/fuse"
 	"github.com/hanwen/go-fuse/fuse/nodefs"
-	"github.com/magiconair/properties"
 )
 
 // Node ...
@@ -268,7 +265,7 @@ func (f *RowFile) GetFileInfo() *FileInfo {
 // Write ...
 func (f *RowFile) Write(file nodefs.File, data []byte, off int64, context *fuse.Context) (written uint32, code fuse.Status) {
 	if !reflect.DeepEqual(f.data, data) {
-		_, err := f.update(data)
+		err := f.update(data)
 		if err != nil {
 			panic(err)
 		} else {
@@ -278,26 +275,16 @@ func (f *RowFile) Write(file nodefs.File, data []byte, off int64, context *fuse.
 	return uint32(int32(len(data))), fuse.OK
 }
 
-func (f *RowFile) update(data []byte) (sql.Result, error) {
-	newP := properties.MustLoadString(string(data))
-	oldP := properties.MustLoadString(string(f.data))
-
-	updCols := make(map[string]string)
-	for k, newV := range newP.Map() {
-		oldV, ok := oldP.Get(k)
-		if ok && oldV != newV {
-			updCols[k] = newV
-		}
+func (f *RowFile) update(data []byte) error {
+	q, p, err := frm.MapToUpdate(f, data)
+	if err != nil {
+		return err
+	} else if q == nil {
+		return nil // Nothing to update
 	}
-
-	pkCols := make(map[string]string)
-	for _, pk := range f.parent.meta.pkCols {
-		pkV, ok := oldP.Get(pk)
-		if !ok {
-			return nil, fmt.Errorf("%s: pk %s is not found", f.parent.meta.tblNm, pk)
-		}
-		pkCols[pk] = pkV
+	_, err = f.parent.con.UpdateRow(*q, p)
+	if err != nil {
+		return err
 	}
-
-	return f.parent.con.UpdateRow(f.parent.meta.tblNm, updCols, pkCols)
+	return nil
 }
