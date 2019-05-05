@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -12,7 +13,7 @@ import (
 type DBCon interface {
 	GetTblsMetadata() (map[string]*TblMeta, error)
 	FetchRows(tbl string) (*sql.Rows, error)
-	UpdateRow(q string, params []interface{}) (sql.Result, error)
+	UpdateRow(upd Update) (sql.Result, error)
 	Close() error
 }
 
@@ -25,6 +26,13 @@ type TblMeta struct {
 // SQLiteCon ...
 type SQLiteCon struct {
 	db *sql.DB
+}
+
+// Update ...
+type Update struct {
+	tbl      string
+	setCls   map[string]interface{}
+	whereCls map[string]interface{}
 }
 
 // OpenSQLiteCon ...
@@ -82,7 +90,8 @@ func (con *SQLiteCon) FetchRows(tbl string) (*sql.Rows, error) {
 }
 
 // UpdateRow ...
-func (con *SQLiteCon) UpdateRow(q string, params []interface{}) (sql.Result, error) {
+func (con *SQLiteCon) UpdateRow(upd Update) (sql.Result, error) {
+	q, params := con.buildUpdateQuery(upd)
 	stmt, err := con.db.Prepare(q)
 	if err != nil {
 		return nil, err
@@ -117,4 +126,25 @@ func (con *SQLiteCon) createTblMeta(db *sql.DB, tbl string) (*TblMeta, error) {
 		}
 	}
 	return &TblMeta{tblNm: tbl, pkCols: pkCols}, nil
+}
+
+func (con *SQLiteCon) buildUpdateQuery(upd Update) (string, []interface{}) {
+	updClause, updParams := clauseAndParams(upd.setCls, " , ")
+	whereClause, whereParams := clauseAndParams(upd.whereCls, " , ")
+
+	sql := fmt.Sprintf("UPDATE %s SET %s WHERE %s", upd.tbl, updClause, whereClause)
+	params := append(updParams, whereParams...)
+	return sql, params
+}
+
+func clauseAndParams(cols map[string]interface{}, sep string) (string, []interface{}) {
+	i := 0
+	clauses := make([]string, len(cols))
+	params := make([]interface{}, len(cols))
+	for k, v := range cols {
+		clauses[i] = fmt.Sprintf("%s = ?", k)
+		params[i] = v
+		i++
+	}
+	return strings.Join(clauses, sep), params
 }

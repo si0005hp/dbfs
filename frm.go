@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 
 	"github.com/magiconair/properties"
 )
@@ -56,12 +55,12 @@ func (m *PropertiesMapper) MapToFile(rs *sql.Rows) ([][]byte, error) {
 }
 
 // MapToUpdate ...
-func (m *PropertiesMapper) MapToUpdate(f *RowFile, data []byte) (*string, []interface{}, error) {
+func (m *PropertiesMapper) MapToUpdate(f *RowFile, data []byte) (*Update, error) {
 	np := properties.MustLoadString(string(data))
 	op := properties.MustLoadString(string(f.data))
 
 	// Extract changed cols only
-	updCols := make(map[string]string)
+	updCols := make(map[string]interface{})
 	for k, nv := range np.Map() {
 		ov, ok := op.Get(k)
 		if ok && ov != nv {
@@ -69,35 +68,22 @@ func (m *PropertiesMapper) MapToUpdate(f *RowFile, data []byte) (*string, []inte
 		}
 	}
 	if len(updCols) <= 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
-	updClause, updParams := clauseAndParams(updCols, " , ")
 
 	// Extract pk cols for building where phrase
-	pkCols := make(map[string]string)
+	pkCols := make(map[string]interface{})
 	for _, pk := range f.parent.meta.pkCols {
 		v, ok := op.Get(pk)
 		if !ok {
-			return nil, nil, fmt.Errorf("%s: pk %s is not found", f.parent.meta.tblNm, pk)
+			return nil, fmt.Errorf("%s: pk %s is not found", f.parent.meta.tblNm, pk)
 		}
 		pkCols[pk] = v
 	}
-	whereClause, whereParams := clauseAndParams(pkCols, " AND ")
 
-	sql := fmt.Sprintf("UPDATE %s SET %s WHERE %s", f.parent.meta.tblNm, updClause, whereClause)
-	params := append(updParams, whereParams...)
-
-	return &sql, params, nil
-}
-
-func clauseAndParams(cols map[string]string, sep string) (string, []interface{}) {
-	i := 0
-	clauses := make([]string, len(cols))
-	params := make([]interface{}, len(cols))
-	for k, v := range cols {
-		clauses[i] = fmt.Sprintf("%s = ?", k)
-		params[i] = v
-		i++
-	}
-	return strings.Join(clauses, sep), params
+	return &Update{
+		tbl:      f.parent.meta.tblNm,
+		setCls:   updCols,
+		whereCls: pkCols,
+	}, nil
 }

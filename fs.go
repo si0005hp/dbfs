@@ -276,13 +276,13 @@ func (f *RowFile) Write(file nodefs.File, data []byte, off int64, context *fuse.
 }
 
 func (f *RowFile) update(data []byte) error {
-	q, p, err := frm.MapToUpdate(f, data)
+	u, err := frm.MapToUpdate(f, data)
 	if err != nil {
 		return err
-	} else if q == nil {
+	} else if u == nil {
 		return nil // Nothing to update
 	}
-	_, err = f.parent.con.UpdateRow(*q, p)
+	_, err = f.parent.con.UpdateRow(*u)
 	if err != nil {
 		return err
 	}
