@@ -109,7 +109,7 @@ func lookup(n nodefs.Node, out *fuse.Attr, name string, ctx *fuse.Context) (*nod
 func openDir(n Node) ([]fuse.DirEntry, fuse.Status) {
 	children, err := n.GetChildren()
 	if err != nil {
-		panic(err)
+		return nil, fuse.EIO
 	}
 	dirs := make([]fuse.DirEntry, len(children))
 	for i, c := range children {
@@ -267,7 +267,7 @@ func (f *RowFile) Write(file nodefs.File, data []byte, off int64, context *fuse.
 	if !reflect.DeepEqual(f.data, data) {
 		err := f.update(data)
 		if err != nil {
-			panic(err)
+			return 0, fuse.EIO
 		} else {
 			f.data = data
 		}

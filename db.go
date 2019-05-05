@@ -35,8 +35,17 @@ type Update struct {
 	whereCls map[string]interface{}
 }
 
-// OpenSQLiteCon ...
-func OpenSQLiteCon(dsn string) (*SQLiteCon, error) {
+// OpenDB ...
+func OpenDB(dbType string, dsn string) (*SQLiteCon, error) {
+	switch dbType {
+	case "sqlite":
+		return openSQLiteCon(dsn)
+	default:
+		return nil, fmt.Errorf("Unsupported DB: %s", dbType)
+	}
+}
+
+func openSQLiteCon(dsn string) (*SQLiteCon, error) {
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return nil, err
@@ -130,7 +139,7 @@ func (con *SQLiteCon) createTblMeta(db *sql.DB, tbl string) (*TblMeta, error) {
 
 func (con *SQLiteCon) buildUpdateQuery(upd Update) (string, []interface{}) {
 	updClause, updParams := clauseAndParams(upd.setCls, " , ")
-	whereClause, whereParams := clauseAndParams(upd.whereCls, " , ")
+	whereClause, whereParams := clauseAndParams(upd.whereCls, " AND ")
 
 	sql := fmt.Sprintf("UPDATE %s SET %s WHERE %s", upd.tbl, updClause, whereClause)
 	params := append(updParams, whereParams...)
