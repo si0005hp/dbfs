@@ -272,7 +272,7 @@ func (f *RowFile) Write(file nodefs.File, data []byte, off int64, context *fuse.
 			f.data = data
 		}
 	}
-	return uint32(int32(len(data))), fuse.OK
+	return uint32(len(data)), fuse.OK
 }
 
 func (f *RowFile) update(data []byte) error {
